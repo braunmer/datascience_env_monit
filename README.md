@@ -14,3 +14,11 @@ Download the repository and follow the instructions to run the project.
 
 ## Who made it?
 Created by Merle.
+
+
+tipps:
+git add dateiname (fügt zum local ding hinzu)
+git commit -m "commit message"
+git push (fügt zum github hinzu)
+
+git status (zeigt den aktuellen status der file an)
