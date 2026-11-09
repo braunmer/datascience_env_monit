@@ -1,19 +1,17 @@
-# Assignments
-#
-# My Project
+# Cluster hello
 
-## What is this?
-This is a project created for my university course.
+Bootstraps a synthetic GPP series and prints a 95% interval.
 
-## How do I run it?
-Download the repository and follow the instructions to run the project.
+## Run
+Rscript scripts/cluster_hello.R 200
 
-## What is in the folder?
-- README.md: Information about the project.
-- Other files: Code and data used in the project.
+## Files
+scripts/  the analysis code
+jobs/     Slurm job scripts
+docs/     notes and templates
 
-## Who made it?
-Created by Merle.
+## Author
+Merle Braun
 
 
 tipps:
