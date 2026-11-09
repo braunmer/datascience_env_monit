@@ -20,3 +20,4 @@ git commit -m "commit message"
 git push (fügt zum github hinzu)
 
 git status (zeigt den aktuellen status der file an)
+touch datei (zum erstellen)
