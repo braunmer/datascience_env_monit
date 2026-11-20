@@ -759,50 +759,8 @@ valid half-hourly observations.
 The slope of the linear regression was
 `r round(energy_slope, 3)`, with an R-squared
 of `r round(energy_r2, 3)`.
-### C6.2. Comparison of the five sites
 
-```{r}
-#| echo: false
 
-annual_carbon <- daily |>
-  mutate(year = year(date)) |>
-  group_by(site, year) |>
-  summarise(
-    annual_NEE = if (
-      n_distinct(date) ==
-        ifelse(leap_year(first(year)), 366, 365) &&
-      !anyNA(NEE_VUT_REF)
-    ) {
-      sum(NEE_VUT_REF)
-    } else {
-      NA_real_
-    },
-    .groups = "drop"
-  )
-
-carbon_summary <- annual_carbon |>
-  group_by(site) |>
-  summarise(
-    complete_years = sum(!is.na(annual_NEE)),
-    mean_annual_NEE = if (all(is.na(annual_NEE))) {
-      NA_real_
-    } else {
-      mean(annual_NEE, na.rm = TRUE)
-    },
-    .groups = "drop"
-  ) |>
-  arrange(mean_annual_NEE)
-
-kable(
-  carbon_summary,
-  digits = 2,
-  col.names = c(
-    "Site",
-    "Complete years",
-    "Mean annual NEE (g C m-2 yr-1)"
-  )
-)
-```
 ### C6.2. Comparison of the five sites
 
 ```{r}
@@ -916,6 +874,9 @@ kable(
   )
 )
 ```
+Among the five investigated sites, JP-Hc3 showed the highest annual net carbon uptake. In contrast, ES-LJu showed the lowest net carbon uptake. The largest seasonal variation in NEE was observed at DK-Sor. Differences between the sites may be related to vegetation type, climatic conditions and the length of the growing season. The diurnal cycles revealed differences in carbon uptake and latent heat flux between seasons. I was particularly surprised by high carbon storage of the cropland in Japan. The proportion of gap-filled NEE data varied considerably between the sites, ranging from 32.88	% to 75.86%.
+
+
 ## Data and citation
 
 ### Site-specific data citations
@@ -934,6 +895,7 @@ for (i in seq_len(nrow(sites))) {
 }
 ```
 
+
 ### FLUXNET methodology
 
 Pastorello, G., et al. (2020).
@@ -943,6 +905,6 @@ Scientific Data, 7, 225.
 
 https://doi.org/10.1038/s41597-020-0534-3
 
-### Acknowledgements
 
-INSERT FLUXNET ACKNOWLEDGEMENT HERE.
+##Git hub link
+https://github.com/braunmer/datascience_env_monit/tree/main/reports
