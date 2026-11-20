@@ -19,9 +19,9 @@
 # Needs: Python 3.9 or newer (the Shuttle itself runs on 3.9-3.13; with only 3.14, uv provides 3.13), Git (to install the Shuttle), internet, ~2-3 GB free disk space.
 
 # ---- 1. Your settings -------------------------------------------------------
-my_student   <- "07"       # your student number from tower_sets_block4.csv
+my_student   <- "35"       # your student number from tower_sets_block4.csv
 my_sites     <- NULL       # or give sites yourself, e.g. c("DE-Hai", "FR-Hes"); then my_student is ignored
-tower_csv    <- "tower_sets_block4.csv"
+tower_csv    <- "homework/tower_sets_block4.csv"
 new_snapshot <- FALSE      # TRUE = make a fresh snapshot even if one exists
 
 shuttle_source <- "git+https://github.com/fluxnet/shuttle.git"
@@ -33,6 +33,9 @@ cl_args <- commandArgs(trailingOnly = TRUE)
 if (length(cl_args) >= 1) my_student <- cl_args[1]
 
 say  <- function(...) cat("\n==> ", ..., "\n", sep = "")
+
+
+
 halt <- function(...) stop(paste0(...), call. = FALSE)
 
 # ---- 2. Which sites? ---------------------------------------------------------
@@ -202,3 +205,80 @@ if (all_ok) {
 } else {
   halt("Some towers are missing or broken. Run the script again; existing files are re-downloaded.")
 }
+
+#assignment function
+library(readr)
+library(dplyr)
+
+keep <- c("TIMESTAMP_START", "TIMESTAMP_END", "TA_F", "SW_IN_F", "VPD_F", "P_F",
+          "NETRAD", "G_F_MDS", "H_F_MDS", "H_F_MDS_QC", "LE_F_MDS", "LE_F_MDS_QC",
+          "NEE_VUT_REF", "NEE_VUT_REF_QC", "GPP_NT_VUT_REF", "RECO_NT_VUT_REF")
+
+zip_file <- list.files("data/raw", pattern = "\\.zip$", full.names = TRUE)[1]
+hh_name  <- grep("FLUXMET_HH", unzip(zip_file, list = TRUE)$Name, value = TRUE)
+unzip(zip_file, files = hh_name, exdir = "data/raw/unzipped")
+
+hh <- read_csv(file.path("data/raw/unzipped", hh_name),
+               na = "-9999",
+               col_select = any_of(keep),
+               col_types = cols(TIMESTAMP_START = "c", TIMESTAMP_END = "c", .default = "d")) |>
+  mutate(time = as.POSIXct(TIMESTAMP_START, format = "%Y%m%d%H%M", tz = "UTC"))
+
+nrow(hh)
+range(hh$time)
+mean(hh$NEE_VUT_REF_QC == 0, na.rm = TRUE)   # share of measured NEE
+
+
+
+#have all towers
+
+read_hh <- function(zip_file) {
+
+  hh_name <- grep(
+    "FLUXMET_HH",
+    unzip(zip_file, list = TRUE)$Name,
+    value = TRUE
+  )
+
+  unzip(
+    zip_file,
+    files = hh_name,
+    exdir = "data/raw/unzipped"
+  )
+
+  site_id <- strsplit(basename(hh_name), "_")[[1]][2]
+
+  hh <- read_csv(
+    file.path("data/raw/unzipped", hh_name),
+    na = "-9999",
+    col_select = any_of(keep),
+    col_types = cols(
+      TIMESTAMP_START = "c",
+      TIMESTAMP_END = "c",
+      .default = "d"
+    )
+  ) |>
+    mutate(
+      time = as.POSIXct(
+        TIMESTAMP_START,
+        format = "%Y%m%d%H%M",
+        tz = "UTC"
+      ),
+      site = site_id
+    )
+
+  return(hh)
+}
+
+zip_files <- list.files(
+  "data/raw",
+  pattern = "\\.zip$",
+  full.names = TRUE
+)
+
+zip_files
+length(zip_files)
+
+hh_all <- bind_rows(
+  lapply(zip_files, read_hh)
+)

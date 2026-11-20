@@ -1,0 +1,948 @@
+---
+title: "Data summary of my five flux towers"
+author: "Merle Braun"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+---
+```{r}
+#| label: setup
+#| include: false
+
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r}
+#| label: load-data
+#| include: false
+
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(knitr)
+library(maps)
+library(lubridate)
+
+keep <- c(
+  "TIMESTAMP_START", "TIMESTAMP_END",
+  "TA_F", "SW_IN_F", "VPD_F", "P_F",
+  "NETRAD", "G_F_MDS",
+  "H_F_MDS", "H_F_MDS_QC",
+  "LE_F_MDS", "LE_F_MDS_QC",
+  "NEE_VUT_REF", "NEE_VUT_REF_QC",
+  "GPP_NT_VUT_REF", "RECO_NT_VUT_REF"
+)
+
+read_hh <- function(zip_file) {
+
+  hh_name <- grep(
+    "FLUXMET_HH",
+    unzip(zip_file, list = TRUE)$Name,
+    value = TRUE
+  )
+
+  unzip(
+    zip_file,
+    files = hh_name,
+    exdir = "data/raw/unzipped"
+  )
+
+  site_id <- strsplit(
+    basename(hh_name), "_"
+  )[[1]][2]
+
+  hh <- read_csv(
+    file.path("data/raw/unzipped", hh_name),
+    na = "-9999",
+    col_select = any_of(keep),
+    col_types = cols(
+      TIMESTAMP_START = "c",
+      TIMESTAMP_END = "c",
+      .default = "d"
+    )
+  ) |>
+    mutate(
+      time = as.POSIXct(
+        TIMESTAMP_START,
+        format = "%Y%m%d%H%M",
+        tz = "UTC"
+      ),
+      site = site_id
+    )
+
+  return(hh)
+}
+
+zip_files <- list.files(
+  "data/raw",
+  pattern = "\\.zip$",
+  full.names = TRUE
+)
+
+stopifnot(length(zip_files) == 5)
+
+hh_all <- bind_rows(
+  lapply(zip_files, read_hh)
+)
+```
+
+## Introduction
+
+This report provides an overview of five FLUXNET towers
+and their half-hourly flux and meteorological measurements.
+The aim is to assess site characteristics, data coverage
+and the distribution of key environmental variables.
+
+Timestamps are provided in local standard time without
+daylight-saving adjustments. UTC is used only as a
+container for storing timestamps in R.
+
+Missing values (-9999) were converted to NA during
+data import.
+
+## C1. Site overview
+
+The five selected flux towers represent different
+geographical locations and ecosystem types.
+
+## C1. Site overview
+
+The five selected FLUXNET towers are located in
+the United States, Switzerland, Spain, Denmark and Japan.
+
+```{r}
+#| echo: false
+
+snapshot <- read_csv(
+  "data/snapshots/fluxnet_shuttle_snapshot_20261119T174438.csv",
+  show_col_types = FALSE
+)
+
+countries <- c(
+  US = "United States",
+  CH = "Switzerland",
+  ES = "Spain",
+  DK = "Denmark",
+  JP = "Japan"
+)
+
+sites <- snapshot |>
+  filter(site_id %in% unique(hh_all$site)) |>
+  mutate(
+    country = unname(countries[substr(site_id, 1, 2)])
+  ) |>
+  select(
+    site_id,
+    site_name,
+    country,
+    igbp,
+    location_lat,
+    location_long,
+    first_year,
+    last_year,
+    network,
+    product_citation
+  ) |>
+  distinct()
+
+kable(
+  sites,
+  col.names = c(
+    "Site ID",
+    "Site name",
+    "Country",
+    "IGBP class",
+    "Latitude",
+    "Longitude",
+    "First year",
+    "Last year",
+    "Network",
+    "Data citation"
+  ),
+  digits = 3
+)
+```
+### Geographical distribution
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 5
+
+world <- map_data("world")
+
+ggplot() +
+  geom_polygon(
+    data = world,
+    aes(x = long, y = lat, group = group),
+    fill = "grey85",
+    colour = "white",
+    linewidth = 0.2
+  ) +
+  geom_point(
+    data = sites,
+    aes(x = location_long, y = location_lat),
+    colour = "red",
+    size = 3
+  ) +
+  geom_text(
+    data = sites,
+    aes(
+      x = location_long,
+      y = location_lat,
+      label = site_id
+    ),
+    nudge_y = 5,
+    check_overlap = TRUE,
+    size = 3.5
+  ) +
+  coord_quickmap() +
+  theme_minimal() +
+  labs(
+    title = "Geographical distribution of the five flux towers",
+    x = "Longitude",
+    y = "Latitude"
+  )
+```
+## C2. Data coverage
+
+Data coverage was assessed as the proportion of half-hourly
+NEE observations that were directly measured
+(NEE_VUT_REF_QC = 0).
+
+```{r}
+#| echo: false
+
+coverage <- hh_all |>
+  mutate(year = year(time)) |>
+  group_by(site, year) |>
+  summarise(
+    share_measured = sum(
+      NEE_VUT_REF_QC == 0,
+      na.rm = TRUE
+    ) / n(),
+    .groups = "drop"
+  )
+
+ggplot(
+  coverage,
+  aes(x = year, y = site, fill = share_measured)
+) +
+  geom_tile() +
+  scale_fill_viridis_c(
+    limits = c(0, 1),
+    labels = scales::label_percent()
+  ) +
+  labs(
+    title = "Coverage of measured NEE",
+    x = "Year",
+    y = "Site",
+    fill = "Measured NEE"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| echo: false
+
+best_coverage <- coverage |>
+  slice_max(share_measured, n = 1, with_ties = TRUE)
+```
+
+The highest data coverage was recorded at
+`r paste(paste0(best_coverage$site, " (", best_coverage$year, ")"), collapse = ", ")`,
+with `r round(max(best_coverage$share_measured) * 100, 1)`%
+of half-hourly NEE observations directly measured.
+## C3. Summary statistics
+
+Summary statistics were calculated for the main flux
+and meteorological variables at each site.
+
+For precipitation, the mean annual sum was calculated
+using complete years without missing precipitation values.
+
+```{r}
+#| echo: false
+
+variables <- c(
+  "TA_F", "SW_IN_F", "VPD_F", "P_F",
+  "NEE_VUT_REF", "GPP_NT_VUT_REF",
+  "RECO_NT_VUT_REF", "H_F_MDS", "LE_F_MDS"
+)
+
+units <- c(
+  TA_F = "°C",
+  SW_IN_F = "W/m²",
+  VPD_F = "hPa",
+  P_F = "mm/30 min",
+  NEE_VUT_REF = "µmol CO2/m²/s",
+  GPP_NT_VUT_REF = "µmol CO2/m²/s",
+  RECO_NT_VUT_REF = "µmol CO2/m²/s",
+  H_F_MDS = "W/m²",
+  LE_F_MDS = "W/m²"
+)
+
+stats <- hh_all |>
+  select(site, all_of(variables)) |>
+  pivot_longer(
+    cols = -site,
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  group_by(site, variable) |>
+  summarise(
+    Mean = if (all(is.na(value))) NA_real_
+           else mean(value, na.rm = TRUE),
+
+    Minimum = if (all(is.na(value))) NA_real_
+              else min(value, na.rm = TRUE),
+
+    Maximum = if (all(is.na(value))) NA_real_
+              else max(value, na.rm = TRUE),
+
+    Missing = mean(is.na(value)) * 100,
+
+    .groups = "drop"
+  )
+
+precipitation <- hh_all |>
+  mutate(year = year(time)) |>
+  group_by(site, year) |>
+  summarise(
+    annual_sum = if (
+      n() == 48 * ifelse(
+        leap_year(first(year)), 366, 365
+      ) && !anyNA(P_F)
+    ) sum(P_F) else NA_real_,
+
+    .groups = "drop"
+  ) |>
+  group_by(site) |>
+  summarise(
+    mean_annual_precipitation =
+      if (all(is.na(annual_sum))) NA_real_
+      else mean(annual_sum, na.rm = TRUE),
+
+    .groups = "drop"
+  )
+
+stats <- stats |>
+  left_join(precipitation, by = "site") |>
+  mutate(
+    Unit = unname(units[variable]),
+
+    Mean = if_else(
+      variable == "P_F",
+      mean_annual_precipitation,
+      Mean
+    ),
+
+    Mean_unit = if_else(
+      variable == "P_F",
+      "mm/year",
+      Unit
+    )
+  )
+```
+
+```{r}
+#| echo: false
+#| results: asis
+
+for (s in unique(stats$site)) {
+
+  cat("\n\n### ", s, "\n\n")
+
+  table_site <- stats |>
+    filter(site == s) |>
+    select(
+      variable, Mean, Mean_unit,
+      Minimum, Maximum, Unit, Missing
+    )
+
+  print(
+    kable(
+      table_site,
+      digits = 2,
+      col.names = c(
+        "Variable",
+        "Mean",
+        "Mean unit",
+        "Minimum",
+        "Maximum",
+        "Min/Max unit",
+        "Missing (%)"
+      )
+    )
+  )
+
+  cat("\n\n")
+}
+```
+## C4. Time series
+
+Half-hourly measurements of NEE, GPP and RECO were
+aggregated to daily means and converted from
+µmol CO2 m-2 s-1 to g C m-2 d-1 using a
+conversion factor of 1.0378.
+
+Only days with 48 valid half-hourly values per
+variable were included in the daily aggregation.
+
+```{r}
+#| echo: false
+
+daily <- hh_all |>
+  mutate(date = as.Date(time, tz = "UTC")) |>
+  group_by(site, date) |>
+  summarise(
+    across(
+      c(NEE_VUT_REF, GPP_NT_VUT_REF, RECO_NT_VUT_REF),
+      ~ if (length(.x) == 48 && !anyNA(.x)) {
+        mean(.x) * 1.0378
+      } else {
+        NA_real_
+      }
+    ),
+    .groups = "drop"
+  )
+
+daily_long <- daily |>
+  pivot_longer(
+    cols = c(
+      NEE_VUT_REF,
+      GPP_NT_VUT_REF,
+      RECO_NT_VUT_REF
+    ),
+    names_to = "variable",
+    values_to = "carbon_flux"
+  ) |>
+  mutate(
+    variable = recode(
+      variable,
+      NEE_VUT_REF = "NEE",
+      GPP_NT_VUT_REF = "GPP",
+      RECO_NT_VUT_REF = "RECO"
+    )
+  )
+```
+
+```{r}
+#| echo: false
+#| fig-width: 12
+#| fig-height: 12
+
+ggplot(
+  daily_long,
+  aes(
+    x = date,
+    y = carbon_flux,
+    colour = variable
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    colour = "grey50"
+  ) +
+  geom_line(linewidth = 0.3) +
+  facet_wrap(
+    ~ site,
+    ncol = 1,
+    scales = "free_x"
+  ) +
+  scale_colour_manual(
+    values = c(
+      NEE = "steelblue",
+      GPP = "forestgreen",
+      RECO = "orange"
+    )
+  ) +
+  labs(
+    title = "Daily carbon fluxes",
+    x = "Date",
+    y = "Carbon flux (g C m-2 d-1)",
+    colour = "Variable"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+### Validation against FLUXMET_DD
+
+The calculated daily NEE values were compared with
+the official daily FLUXMET product for one site.
+
+```{r}
+#| echo: false
+
+check_zip <- zip_files[1]
+
+dd_name <- grep(
+  "FLUXMET_DD",
+  unzip(check_zip, list = TRUE)$Name,
+  value = TRUE
+)
+
+unzip(
+  check_zip,
+  files = dd_name,
+  exdir = "data/raw/unzipped"
+)
+
+check_site <- strsplit(
+  basename(dd_name), "_"
+)[[1]][2]
+
+dd <- read_csv(
+  file.path("data/raw/unzipped", dd_name),
+  na = "-9999",
+  col_select = any_of(
+    c("TIMESTAMP", "NEE_VUT_REF")
+  ),
+  col_types = cols(
+    TIMESTAMP = "c",
+    .default = "d"
+  )
+) |>
+  mutate(
+    date = as.Date(
+      TIMESTAMP,
+      format = "%Y%m%d"
+    )
+  )
+
+comparison <- daily |>
+  filter(site == check_site) |>
+  select(date, calculated = NEE_VUT_REF) |>
+  inner_join(
+    dd |>
+      select(date, official = NEE_VUT_REF),
+    by = "date"
+  ) |>
+  filter(
+    !is.na(calculated),
+    !is.na(official)
+  )
+
+comparison |>
+  summarise(
+    Site = check_site,
+    Days_compared = n(),
+    Correlation = cor(calculated, official),
+    Mean_absolute_difference =
+      mean(abs(calculated - official))
+  ) |>
+  kable(digits = 4)
+```
+
+```{r}
+#| echo: false
+
+ggplot(
+  comparison,
+  aes(x = official, y = calculated)
+) +
+  geom_point(alpha = 0.3) +
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    colour = "red"
+  ) +
+  coord_equal() +
+  labs(
+    title = paste("Daily aggregation check:", check_site),
+    x = "Official daily NEE (g C m-2 d-1)",
+    y = "Calculated daily NEE (g C m-2 d-1)"
+  ) +
+  theme_minimal()
+```
+## C5. Diurnal cycles
+
+Mean diurnal cycles of NEE and latent heat flux (LE)
+were calculated for each site and season.
+
+Meteorological seasons were defined using the latitude
+of each site. For sites in the Southern Hemisphere,
+seasons were reversed relative to the Northern Hemisphere.
+
+All five selected sites are located in the
+Northern Hemisphere.
+
+```{r}
+#| echo: false
+
+diurnal <- hh_all |>
+  left_join(
+    sites |>
+      select(site_id, location_lat) |>
+      distinct(),
+    by = c("site" = "site_id")
+  ) |>
+  mutate(
+    month = month(time),
+
+    hour_of_day = hour(time) + minute(time) / 60,
+
+    season = case_when(
+      month %in% c(3, 4, 5) ~ "Spring",
+      month %in% c(6, 7, 8) ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Autumn",
+      TRUE ~ "Winter"
+    ),
+
+    season = case_when(
+      location_lat < 0 & season == "Spring" ~ "Autumn",
+      location_lat < 0 & season == "Summer" ~ "Winter",
+      location_lat < 0 & season == "Autumn" ~ "Spring",
+      location_lat < 0 & season == "Winter" ~ "Summer",
+      TRUE ~ season
+    ),
+
+    season = factor(
+      season,
+      levels = c(
+        "Spring", "Summer",
+        "Autumn", "Winter"
+      )
+    )
+  ) |>
+  group_by(site, season, hour_of_day) |>
+  summarise(
+    NEE = mean(NEE_VUT_REF, na.rm = TRUE),
+    LE = mean(LE_F_MDS, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+#| echo: false
+#| fig-width: 14
+#| fig-height: 7
+
+diurnal_long <- diurnal |>
+  pivot_longer(
+    cols = c(NEE, LE),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  mutate(
+    variable = recode(
+      variable,
+      NEE = "NEE (µmol CO2 m-2 s-1)",
+      LE = "LE (W m-2)"
+    )
+  )
+
+ggplot(
+  diurnal_long,
+  aes(
+    x = hour_of_day,
+    y = value,
+    colour = site
+  )
+) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    variable ~ season,
+    scales = "free_y"
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 6, 12, 18, 24)
+  ) +
+  labs(
+    title = "Mean seasonal diurnal cycles",
+    x = "Hour of day (local standard time)",
+    y = NULL,
+    colour = "Site"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+## C6. Interpretation
+
+### C6.1. Energy balance closure
+
+Energy balance closure was assessed by comparing
+the sum of sensible and latent heat fluxes (H + LE)
+with available energy (NETRAD - G).
+
+Only half-hourly observations with directly measured
+H and LE values (QC = 0) and available radiation
+and ground heat flux data were included.
+
+```{r}
+#| echo: false
+
+energy <- hh_all |>
+  filter(
+    H_F_MDS_QC == 0,
+    LE_F_MDS_QC == 0,
+    !is.na(H_F_MDS),
+    !is.na(LE_F_MDS),
+    !is.na(NETRAD),
+    !is.na(G_F_MDS)
+  ) |>
+  mutate(
+    available_energy = NETRAD - G_F_MDS,
+    turbulent_flux = H_F_MDS + LE_F_MDS
+  )
+
+energy_sites <- energy |>
+  count(site, sort = TRUE)
+
+stopifnot(nrow(energy_sites) > 0)
+
+energy_site <- energy_sites$site[1]
+
+energy_data <- energy |>
+  filter(site == energy_site)
+
+energy_model <- lm(
+  turbulent_flux ~ available_energy,
+  data = energy_data
+)
+
+energy_slope <- coef(energy_model)[2]
+
+energy_r2 <- summary(energy_model)$r.squared
+```
+
+```{r}
+#| echo: false
+#| fig-width: 7
+#| fig-height: 6
+
+ggplot(
+  energy_data,
+  aes(
+    x = available_energy,
+    y = turbulent_flux
+  )
+) +
+  geom_point(
+    alpha = 0.08,
+    size = 0.8
+  ) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    colour = "red",
+    linetype = "dashed"
+  ) +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    se = FALSE,
+    colour = "steelblue"
+  ) +
+  coord_equal() +
+  labs(
+    title = paste("Energy balance closure:", energy_site),
+    subtitle = paste(
+      "Slope =", round(energy_slope, 3),
+      "| R² =", round(energy_r2, 3)
+    ),
+    x = "NETRAD - G (W m-2)",
+    y = "H + LE (W m-2)"
+  ) +
+  theme_minimal()
+```
+
+The energy balance was evaluated at site
+`r energy_site`, using `r nrow(energy_data)`
+valid half-hourly observations.
+
+The slope of the linear regression was
+`r round(energy_slope, 3)`, with an R-squared
+of `r round(energy_r2, 3)`.
+### C6.2. Comparison of the five sites
+
+```{r}
+#| echo: false
+
+annual_carbon <- daily |>
+  mutate(year = year(date)) |>
+  group_by(site, year) |>
+  summarise(
+    annual_NEE = if (
+      n_distinct(date) ==
+        ifelse(leap_year(first(year)), 366, 365) &&
+      !anyNA(NEE_VUT_REF)
+    ) {
+      sum(NEE_VUT_REF)
+    } else {
+      NA_real_
+    },
+    .groups = "drop"
+  )
+
+carbon_summary <- annual_carbon |>
+  group_by(site) |>
+  summarise(
+    complete_years = sum(!is.na(annual_NEE)),
+    mean_annual_NEE = if (all(is.na(annual_NEE))) {
+      NA_real_
+    } else {
+      mean(annual_NEE, na.rm = TRUE)
+    },
+    .groups = "drop"
+  ) |>
+  arrange(mean_annual_NEE)
+
+kable(
+  carbon_summary,
+  digits = 2,
+  col.names = c(
+    "Site",
+    "Complete years",
+    "Mean annual NEE (g C m-2 yr-1)"
+  )
+)
+```
+### C6.2. Comparison of the five sites
+
+```{r}
+#| echo: false
+
+annual_carbon <- daily |>
+  mutate(year = year(date)) |>
+  group_by(site, year) |>
+  summarise(
+    annual_NEE = if (
+      n_distinct(date) ==
+        ifelse(leap_year(first(year)), 366, 365) &&
+      !anyNA(NEE_VUT_REF)
+    ) {
+      sum(NEE_VUT_REF)
+    } else {
+      NA_real_
+    },
+    .groups = "drop"
+  )
+
+carbon_summary <- annual_carbon |>
+  group_by(site) |>
+  summarise(
+    complete_years = sum(!is.na(annual_NEE)),
+    mean_annual_NEE = if (all(is.na(annual_NEE))) {
+      NA_real_
+    } else {
+      mean(annual_NEE, na.rm = TRUE)
+    },
+    .groups = "drop"
+  ) |>
+  arrange(mean_annual_NEE)
+
+kable(
+  carbon_summary,
+  digits = 2,
+  col.names = c(
+    "Site",
+    "Complete years",
+    "Mean annual NEE (g C m-2 yr-1)"
+  )
+)
+```
+```{r}
+#| echo: false
+
+seasonal_amplitude <- daily |>
+  mutate(month = month(date)) |>
+  group_by(site, month) |>
+  summarise(
+    monthly_NEE = mean(
+      NEE_VUT_REF,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  group_by(site) |>
+  summarise(
+    amplitude = if (
+      all(is.finite(monthly_NEE)) &&
+      n() == 12
+    ) {
+      max(monthly_NEE) - min(monthly_NEE)
+    } else {
+      NA_real_
+    },
+    .groups = "drop"
+  ) |>
+  arrange(desc(amplitude))
+
+kable(
+  seasonal_amplitude,
+  digits = 2,
+  col.names = c(
+    "Site",
+    "Seasonal NEE amplitude (g C m-2 d-1)"
+  )
+)
+```
+```{r}
+#| echo: false
+
+gap_summary <- hh_all |>
+  group_by(site) |>
+  summarise(
+    measured = mean(
+      NEE_VUT_REF_QC %in% 0 &
+      !is.na(NEE_VUT_REF)
+    ) * 100,
+
+    gap_filled = mean(
+      NEE_VUT_REF_QC %in% c(1, 2, 3) &
+      !is.na(NEE_VUT_REF)
+    ) * 100,
+
+    missing_or_unknown =
+      100 - measured - gap_filled,
+
+    .groups = "drop"
+  )
+
+kable(
+  gap_summary,
+  digits = 2,
+  col.names = c(
+    "Site",
+    "Measured (%)",
+    "Gap-filled (%)",
+    "Missing or unknown (%)"
+  )
+)
+```
+## Data and citation
+
+### Site-specific data citations
+
+```{r}
+#| echo: false
+#| results: asis
+
+for (i in seq_len(nrow(sites))) {
+  cat(
+    "**", sites$site_id[i], "**: ",
+    sites$product_citation[i],
+    "\n\n",
+    sep = ""
+  )
+}
+```
+
+### FLUXNET methodology
+
+Pastorello, G., et al. (2020).
+The FLUXNET2015 dataset and the ONEFlux processing
+pipeline for eddy covariance data.
+Scientific Data, 7, 225.
+
+https://doi.org/10.1038/s41597-020-0534-3
+
+### Acknowledgements
+
+INSERT FLUXNET ACKNOWLEDGEMENT HERE.
